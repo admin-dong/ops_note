@@ -1,0 +1,187 @@
+## 简介
+
+k8s基于**kubeasz安装，kubeasz** 致力于提供快速部署高可用`k8s`集群的工具, 同时也努力成为`k8s`实践、使用的参考书；基于二进制方式部署和利用`ansible-playbook`实现自动化；既提供一键安装脚本, 也可以根据`安装指南`分步执行安装各个组件。
+
+参考地址：[GitHub - easzlab/kubeasz: 使用Ansible脚本安装K8S集群，介绍组件交互原理，方便直接，不受国内网络环境影响](https://github.com/easzlab/kubeasz)
+
+## 前置工作
+
+1.**kubeasz是基于ansible的，因此安装前需要安装ansible,ansible的安装请参考ansible安装手册**
+
+2.安装包在192.168.2.168:/home/devops/k8s_pv/k8s-install.zip 。
+
+3.确保在干净的系统上开始安装，不能使用曾经装过kubeadm或其他k8s发行版的环境
+
+## 集群安装
+
+该文档演示 1master 1etcd 2node 搭建模式，共需3台服务器,且有root账号
+
+选择其中一台机器作为master,需要在该机器安装ansible，并检查 python-netaddr是否安装
+
+yum list installed | grep "python-netaddr"
+
+![img](https://cdn.nlark.com/yuque/0/2024/png/35538885/1731405219854-070a9cb9-db50-44bd-b49c-788a22eaf92a.png)
+
+demo如下：
+
+192.168.5.200 master/etcd 
+
+192.168.5.201 node 
+
+192.168.5.202 node
+
+操作账号: root
+
+1. unzip k8s-install.zip
+2. cd k8s-install
+3. cp -r ansible /etc/
+4. cd /etc/ansible
+5.  vi hosts
+
+![img](https://cdn.nlark.com/yuque/0/2024/png/35538885/1731405219891-24c663dd-f9ca-4613-8bf9-304795a8431f.png)
+
+ssh-keygen -t rsa -b 2048 -N '' -f ~/.ssh/id_rsa
+
+ssh-copy-id 192.168.5.200
+
+ssh-copy-id 192.168.5.201
+
+1. ssh-copy-id 192.168.5.202 
+2. ansible all -m ping
+
+![img](https://cdn.nlark.com/yuque/0/2024/png/35538885/1731405219866-ff5688cb-4e37-46f9-84c9-3b0107f68f3e.png)
+
+1. ansible-playbook 90.setup.yml (4c8g 需要20多分钟)
+
+![img](https://cdn.nlark.com/yuque/0/2024/png/35538885/1731405220080-7e9ac992-c0f5-4c0a-828c-0f21612eb22e.png)
+
+1. kubectl get node 
+
+![img](https://cdn.nlark.com/yuque/0/2024/png/35538885/1731405219993-d6dcef98-6914-49d4-b853-5fa84e7be804.png)
+
+1. vi /etc/docker/daemon.json (每一台机器都操作)
+
+ 修改: "insecure-registries" : ["192.168.2.160"], 
+
+1. systemctl reload docker
+2. docker login 192.168.2.160. (每一台机器都操作)
+
+![img](https://cdn.nlark.com/yuque/0/2024/png/35538885/1731405221015-f1b0e181-3669-465f-9b5b-7d4e0c6c333b.png)
+
+## 删除集群节点
+
+在master节点操作
+
+1.检测是否可以删除
+
+ kubectl get pods -o wide
+
+1.1如果node上有pod,那么先驱逐pod
+
+kubectl drain k8s-node03 --delete-local-data --force --ignore-daemonsets
+
+2.删除节点
+
+cd /etc/ansible/bin
+
+easzctl del-node 192.168.5.201
+
+3.检查node
+
+kubectl get node
+
+## 增加集群节点
+
+在master节点操作
+
+如添加192.168.5.204
+
+执行以下命令
+
+ssh-copy-id 192.168.5.204
+
+cd /etc/ansible/tools
+
+easzctl add-node 192.168.5.204
+
+检查
+
+kubectl get node
+
+![img](https://cdn.nlark.com/yuque/0/2024/png/35538885/1731405221779-63e12501-db56-4bd2-8c53-0b767214a1ac.png)
+
+## k8s-server接口
+
+### 1.创建资源
+
+接口类型:POST
+
+接口地址：/kubernetes-server/exec
+
+请求参数：request body
+
+```
+{
+"uuid":"",
+"kube_config":"",
+"yml_config":"",
+"namespace":""
+}
+```
+
+### 2.获取deployment详情
+
+接口类型:POST
+
+接口地址：/kubernetes-server/getDeployment
+
+请求参数：request body
+
+```
+{
+"namespace":"xxxxxx",
+"deployments":"xxxxx",
+"server":"https://10.2.1.50:6443",
+"uuid":"aaaaa",
+"kube_config":"apiVersion: v1
+clusters:
+- cluster:
+    certificate-authority-data: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUR1RENDQXFDZ0F3SUJBZ0lVRFBRZ0Z6a0kyS3ZqNDZTM1Q4b3BXblR3UHY4d0RRWUpLb1pJaHZjTkFRRUwKQlFBd1lURUxNQWtHQTFVRUJoTUNRMDR4RVRBUEJnTlZCQWdUQ0VoaGJtZGFhRzkxTVFzd0NRWURWUVFIRXdKWQpVekVNTUFvR0ExVUVDaE1EYXpoek1ROHdEUVlEVlFRTEV3WlRlWE4wWlcweEV6QVJCZ05WQkFNVENtdDFZbVZ5CmJtVjBaWE13SUJjTk1qSXdNakEzTURrek1UQXdXaGdQTWpFeU1qQXhNVFF3T1RNeE1EQmFNR0V4Q3pBSkJnTlYKQkFZVEFrTk9NUkV3RHdZRFZRUUlFd2hJWVc1bldtaHZkVEVMTUFrR0ExVUVCeE1DV0ZNeEREQUtCZ05WQkFvVApBMnM0Y3pFUE1BMEdBMVVFQ3hNR1UzbHpkR1Z0TVJNd0VRWURWUVFERXdwcmRXSmxjbTVsZEdWek1JSUJJakFOCkJna3Foa2lHOXcwQkFRRUZBQU9DQVE4QU1JSUJDZ0tDQVFFQXlOaHoyNHE1OUxjYkNFcWZvZzhHRm1QUllaSVEKbU1lNTZST0MzK1pmdHYvSUtpbU1jMndaNG5DWm9VNTFuUDFXdXNpOGdrRHI0ZWhZajdqRm9OaGNMUEVBUk9zdwprRFUraTBxNnZEeVZ4YVdaTWFTZjB2SjZzdXl4YW5leEo0UFh6R3U5OEphc0Y4V0xybENYdDVyeGFuQXZidndjCkYvNlBxc09BdnBlQjdCejRCTmFpODFwZmZ0dGFNTVpFeWt1TE1uY3NyZ1VVeDNDSWhIK3dvQ04wTE1uTXJIdDkKRy9lK0VqdTlyWVNia2plMzZ2ZS9IV01NVnBXQW14d3V0UXFDUUZKcmFDeS9DN2RMR2Y2UnZMV2JBNnIxOTdtWQpVT0M4aFdwdDB5L0s2OG9mTlRwNjJkUGE0TnlFNFcvTEQ3eDkwZ1hrYnhBd1htKzFFUi9lc1gvK3J3SURBUUFCCm8yWXdaREFPQmdOVkhROEJBZjhFQkFNQ0FRWXdFZ1lEVlIwVEFRSC9CQWd3QmdFQi93SUJBakFkQmdOVkhRNEUKRmdRVXAwNjZVZHp3bHhLdHp3OEJ2TDVVbHduSnJqc3dId1lEVlIwakJCZ3dGb0FVcDA2NlVkendseEt0enc4Qgp2TDVVbHduSnJqc3dEUVlKS29aSWh2Y05BUUVMQlFBRGdnRUJBSEtranROSllVQXRaLzh1Mkt3OEtUK1FjY254CmtidTMyYnlEcTUzVXdJQVZKSFM0b0JHQlNrVXZkaW92YmsraldqcnZEc2tpVVVCdm84anBBTy9qdkpGajJSMTkKM3FTY29kOHIreGpoeU5BU00yZHVseEp0cUJpbDU2cWNBUHh4V0xZQzRaZGVPWFo1YnFudDFGeUxCVks2WHFCSQpJS1NLMzN4ajEvd1VTclVXREE4NGhMM1FrRHRsbjNCYzA4S3p0TnNaOEo3RDRRdUsvSWdOeklJcmdXb2RzZ1Z4CjEvVXdIeXJjb1FZV0duMzZidUllY3hmaDljUHpuV2FJeHdNSTJSaXlJU1F2R29pby84S1NQc1JSejZzUWdJekYKWXZHSVRqYkU0b1dvTnE3ZkdZLzdwVmFrZWIzemFON1ZzcGJSR3U3UDM3b3RGZ3FJMkR3K3hhZXlzOEU9Ci0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K
+    server: https://10.2.1.50:6443
+  name: cluster1
+contexts:
+- context:
+    cluster: cluster1
+    user: admin
+  name: context-cluster1-admin
+current-context: context-cluster1-admin
+kind: Config
+preferences: {}
+users:
+- name: admin
+  user:
+    client-certificate-data: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUQxekNDQXIrZ0F3SUJBZ0lVUlozQUxIYWkyKzN5UlZXNStTeHB6QVhKdkdrd0RRWUpLb1pJaHZjTkFRRUwKQlFBd1lURUxNQWtHQTFVRUJoTUNRMDR4RVRBUEJnTlZCQWdUQ0VoaGJtZGFhRzkxTVFzd0NRWURWUVFIRXdKWQpVekVNTUFvR0ExVUVDaE1EYXpoek1ROHdEUVlEVlFRTEV3WlRlWE4wWlcweEV6QVJCZ05WQkFNVENtdDFZbVZ5CmJtVjBaWE13SUJjTk1qSXhNREl4TURZek9EQXdXaGdQTWpBM01qRXdNRGd3TmpNNE1EQmFNR2N4Q3pBSkJnTlYKQkFZVEFrTk9NUkV3RHdZRFZRUUlFd2hJWVc1bldtaHZkVEVMTUFrR0ExVUVCeE1DV0ZNeEZ6QVZCZ05WQkFvVApEbk41YzNSbGJUcHRZWE4wWlhKek1ROHdEUVlEVlFRTEV3WlRlWE4wWlcweERqQU1CZ05WQkFNVEJXRmtiV2x1Ck1JSUJJakFOQmdrcWhraUc5dzBCQVFFRkFBT0NBUThBTUlJQkNnS0NBUUVBb1dSeko0RHZHK01XVndqM1hxQ2QKUmkwMG0raUlPYkh4ZGZidmNzbTNlMzdNOU9Cd3VhSXZRTWpSSnFUYkJ0ck0wb3V2ZE5vMTEyb2JOOFc0N3FiYgpwSDlRYnZqMDRUa2cvZ1JLVU5Bc1hldWpFU3IyWHZxUldKb2F3SkVyWVRoVTBEZGg4Y3Rhc2dSOTV4YjBrMU9wCk83L3hsZkxzSXB1Q1YwNHFIQ0JIY2w4UUJ1Q2NNbXdFTytCdGc1Wjh5MDJHWTcyTGp0a2ltVDZMeWtFT1liUTUKNzladFZjVWdyU2NZWUZwTnEvV294eENTTWx2QzZ0bjQrUUk5MnNrTlVDT2FmKzZKM2NwamtCNjJwbml2QlYzMApHeS9XN0hkWHo3VTZFd2xkR1dHOThHNmQxUlVobjZqL1NLSTJTM2ZTU2pOTm5OdDcyMm1PMStKMW92Ni9sWXJXCi93SURBUUFCbzM4d2ZUQU9CZ05WSFE4QkFmOEVCQU1DQmFBd0hRWURWUjBsQkJZd0ZBWUlLd1lCQlFVSEF3RUcKQ0NzR0FRVUZCd01DTUF3R0ExVWRFd0VCL3dRQ01BQXdIUVlEVlIwT0JCWUVGRFhSZVg4U3JNY2pvTEdncmlLYgpMd2t1SkVnY01COEdBMVVkSXdRWU1CYUFGS2RPdWxIYzhKY1NyYzhQQWJ5K1ZKY0p5YTQ3TUEwR0NTcUdTSWIzCkRRRUJDd1VBQTRJQkFRQXh2OVdITmljc0FYT1N0TndWVWIxaTJubGcvamlUYnhzV05ndGNBVWE3K1RaVGZiQUkKdG03Tm1jbC93emxkNlJTcnA3QTdoRXVNVGJQc0JJLzVNNXJUZmJwaG04cG1OU3U1LzZXUUFSNVBUUFNBS2FzUApXd2hkUzUySloydWFpSzBlSTgvcmxJY2V5UVBrMU9OTTFNcW4wK1paVldCVURPRTBGb1V5ZTFKSjQxT0sxRnE3CjFnTFVpYWFVc095ZHRyVHM1WXp0T3B6MjNQUFM3a0thQUd3ZG0wUTVmMFVtV2ZIUkFMS2x5V20ySERrOXFqYksKU044elUrVUdTNitGV05IaTJTWHZ5ZmV0MkY4UGVKcG5BNVpFZXRNZVo3V0JlNURNMUJDdW96NW9sRXczNW9uRQp1NXVuSFNlb0hEKzY0bVdsQnFJeW5jRDVZblhDZDF6azhmWDQKLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=
+    client-key-data: LS0tLS1CRUdJTiBSU0EgUFJJVkFURSBLRVktLS0tLQpNSUlFb3dJQkFBS0NBUUVBb1dSeko0RHZHK01XVndqM1hxQ2RSaTAwbStpSU9iSHhkZmJ2Y3NtM2UzN005T0J3CnVhSXZRTWpSSnFUYkJ0ck0wb3V2ZE5vMTEyb2JOOFc0N3FiYnBIOVFidmowNFRrZy9nUktVTkFzWGV1akVTcjIKWHZxUldKb2F3SkVyWVRoVTBEZGg4Y3Rhc2dSOTV4YjBrMU9wTzcveGxmTHNJcHVDVjA0cUhDQkhjbDhRQnVDYwpNbXdFTytCdGc1Wjh5MDJHWTcyTGp0a2ltVDZMeWtFT1liUTU3OVp0VmNVZ3JTY1lZRnBOcS9Xb3h4Q1NNbHZDCjZ0bjQrUUk5MnNrTlVDT2FmKzZKM2NwamtCNjJwbml2QlYzMEd5L1c3SGRYejdVNkV3bGRHV0c5OEc2ZDFSVWgKbjZqL1NLSTJTM2ZTU2pOTm5OdDcyMm1PMStKMW92Ni9sWXJXL3dJREFRQUJBb0lCQUJIdmFzaWlFSEJsN1E2aApCWFJ6bnVhMGtWc2VIVDFrSS9RN0MrTVN2Wnd3dkRBZVhRaVVHSEkzbnQ2UGhYT2VqeEo2eVhYUDVoblpSY3NOCjR2NUtkckF5SWNzalNYdFo4T3VwcUdTUXJjMkdLU240UDBiUXk2UXdBL2NRYXVTejhPRHV0cWk3TTRvQzY4YnAKaXlad0xxZGdMa1crcURVMFdPakEyL2NpTXk1bmF0L2dzcktZaHhBdHU2clZkSnlOL2VnNnAwbld1bjh4czlUYwpvR09PZXB2bGlNNm9nS0h5Zmw3Tm5WdXAxUkk3eEIzUjVWOThpdXBERU5MUTNyaS9rWWtsWHN4S05PdmlId2NUClhiYzhHRUFzdHJxU2pmUXZ6V0xpbHhSdWppN0hRczVNUnc2cDUwUmJxbm12ckZFN3g4aGRIQ2NHTFpHWGp5WGoKcFlkRUJFa0NnWUVBeklsbHBPUjZ5OVNLK1dzQkJ3UERGUlZqNEJuOW1LSWd1TFE3bVhGQzFzbmlxY0NxVW1VTwp5L2VHRXRrWmh2N3VScFZKYnlhc1ZPUlpPUnM2a1RCWUg4T0M1cjhIUkFuMWpxL2xzQ0pIV1l5djVNMUtZbnVXCllMcXZ1cll6QjAwSC9KWDR0WlR2WXljQlorRjQwbWQ1OXVsQ0tUby9iYitvd2dMSEZTdHJESXNDZ1lFQXlnQUwKTSsyeFZEZklWSXZXWnZzVnpDbDFOWjE5by9xeDRINWQyZUoxTFg3Z3B4R1lxMEdOY1lTUUxFdjdOdFdqTGUwUwp4d0xJdGMyb1BnTXBWcUhYUjZ3dkxqalg5Ym9saWV1WDdJMTMvUURZV2pFZ294NzdVN2JueUpoWHRsaG8yK1NQCmorVzJqZUxqR3hDSWdmSDV6Y2t2WEltSUs3ZldzVGhJK3VsMGFkMENnWUVBbGc3RFhLc25qLzBhREl5OWp6anEKV2NCOHFzQkd0a0ZVQWs1d1gwMmgvTlRXanpYRGYzbVcxbnQ5aUx4d0p3TkhLcytCdGFOSTBXdEtMa1JVdm9vYQpUUXR5TVBtN1NlYUltaXRnTnMyZlRRcVRUU2h6eHpibWg0YlBRQXRGK3JoQUFNYkNWZTJ6aHlucHRSM05ONGdsCkNjbnQrVE03cjdmcUJwUmxISm5qQ3FzQ2dZQVI3UjhSWks2d0FxTk1uWHhSZDBiZjcyM3ZiQ0tTUXRVMlR3Q1YKTFh1b3BmSFo0YjNpdE5hUWxHc1hBMGN2L3BXVXBjMWN5K3B6OStST1hJbDJuclkwTGh1aHhubWozUGtuM0RpSApUYWF3VlRyZUJpNFhTOUNTQlZGY2craUV6aVBBSC9COW5LMHV1a3ZkUXdKYVJkY2RaQlZINlF5a2xKUUE5alhECnpxUCtJUUtCZ0Z0VG1hV3lETEg1THZIRno2UzBrL1FYZ2xtRER6bzZHSFQxRHlCMmZGNDVwMjB4TEtYTGN5R3UKWW9CNTVrbFRteTRYajB2SVpXdFRzY3NRenJFYzBYZXA4TlY5WkU5R3ZRYnZlR25ZRm5tanh2ZU1nR2lGbDBpbApZNTByMjU4ZndLT3M4NUZ0Und0STVHTGk3eW5XS04zYXFZTkxSd0NGZUhpNHpGcUFwNVkrCi0tLS0tRU5EIFJTQSBQUklWQVRFIEtFWS0tLS0tCg=="
+}
+```
+
+### 3.获取pod日志
+
+接口类型:POST
+
+接口地址：/kubernetes-server/getPodLog
+
+请求参数：request body
+
+返回最多1M，5分钟内日志
+
+```
+{
+"namespace":"",
+"pod":"",
+"container":"",
+"server":"",
+"uuid":"",
+"kube_config":""
+}
+```
